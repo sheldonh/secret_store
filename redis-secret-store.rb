@@ -18,7 +18,7 @@ class SecureSecretStore
   end
 
   def get_all_secrets
-    @store.get_map.tap do |map|
+    @store.all.tap do |map|
       map.each do |k, v|
         crypts[k] = @crypto.decrypt(@marshal.unmarshal(v))
       end
@@ -26,23 +26,41 @@ class SecureSecretStore
   end
 end
 
+class StoreProviderAPI
+  def initialize(store, object)
+    @store = store
+    @object = object
+  end
+
+  def set(property, value)
+    @store.set(@object, property, value)
+  end
+
+  def get(property)
+    @store.get(@object, property)
+  end
+
+  def all
+    @store.all(@object)
+  end
+end
+
 class RedisStoreProvider
-  def initialize(redis, key_prefix)
+  def initialize(redis)
     @redis = redis
-    @key_prefix = key_prefix
   end
 
-  def set(key, value)
-    @redis.set(prefixed_key(key), value)
-    @redis.rpush(@key_prefix, key)
+  def set(prefix, key, value)
+    @redis.set(compound_key(prefix, key), value)
+    @redis.rpush(prefix, key)
   end
 
-  def get(key)
-    @redis.get(prefixed_key(key))
+  def get(prefix, key)
+    @redis.get(compound_key(prefix, key))
   end
 
-  def get_map
-    keys = get_list(@key_prefix)
+  def all(prefix)
+    keys = @redis.lrange(prefix, 0, -1)
     {}.tap do |map|
       keys.each do |key|
         v = get(key)
@@ -53,78 +71,70 @@ class RedisStoreProvider
 
   private
 
-    def get_list(key)
-      @redis.lrange(key, 0, -1)
+    def compound_key(prefix, key)
+      prefix + ":" + key
     end
+end
 
-    def prefixed_key(key)
-      @key_prefix + ":" + key
-    end
+class CryptoProviderAPI
+  def initialize(provider, key)
+    @provider = provider
+    @key = key
+  end
 
+  def encrypt(cleartext)
+    @provider.encrypt(@key, cleartext)
+  end
+
+  def decrypt(ciphertext)
+    @provider.decrypt(@key, ciphertext)
+  end
 end
 
 require "openssl"
-class Aes256CbcCryptoProvider
+module Aes256CbcCryptoProvider
 
   ITERATIONS = 20_000 unless defined?(ITERATIONS)
 
-  def initialize(encryption_key)
-    @encryption_key = encryption_key
+  def self.encrypt(key, plaintext)
+    cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
+    cipher.encrypt
+    iv = cipher.random_iv
+    salt = Time.now.nsec.to_s
+    iterations = ITERATIONS
+    cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
+    ciphertext = cipher.update(plaintext) + cipher.final
+    {iv: iv, salt: salt, iterations: iterations, ciphertext: ciphertext}
   end
 
-  def encrypt(secret)
-    Crypto::encrypt(@encryption_key, secret)
+  def self.decrypt(key, crypto)
+    ciphertext, iv, salt, iterations = crypto[:ciphertext], crypto[:iv], crypto[:salt], crypto[:iterations]
+    cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
+    cipher.decrypt
+    cipher.iv = iv
+    cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
+    plaintext = cipher.update(ciphertext) + cipher.final
   end
-
-  def decrypt(crypto)
-    Crypto::decrypt(@encryption_key, crypto)
-  end
-
-  private
-
-    module Crypto
-
-      def self.encrypt(key, plaintext)
-        cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
-        cipher.encrypt
-        iv = cipher.random_iv
-        salt = Time.now.nsec.to_s
-        iterations = ITERATIONS
-        cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
-        ciphertext = cipher.update(plaintext) + cipher.final
-        {iv: iv, salt: salt, iterations: iterations, ciphertext: ciphertext}
-      end
-
-      def self.decrypt(key, crypto)
-        ciphertext, iv, salt, iterations = crypto[:ciphertext], crypto[:iv], crypto[:salt], crypto[:iterations]
-        cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
-        cipher.decrypt
-        cipher.iv = iv
-        cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
-        plaintext = cipher.update(ciphertext) + cipher.final
-      end
-
-    end
-
 end
 
-class Aes256CbcJsonMapMarshal
-  def initialize
-    @marshal = JsonMapMarshal.new(:iv => :base64, :salt => :base64, :iterations => :literal, :ciphertext => :base64)
+class CryptoMarshalAPI
+  def initialize(provider)
+    @provider = provider
   end
 
-  def marshal(map)
-    @marshal.marshal(map)
+  def marshal(encrypted_data)
+    @provider.marshal(encrypted_data)
   end
 
-  def unmarshal(string)
-    @marshal.unmarshal(string)
+  def unmarshal(encoded_data)
+    @provider.unmarshal(encoded_data)
   end
 end
 
 require 'base64'
 require 'json'
-class JsonMapMarshal
+class JsonBase64MapMarshal
+
   def initialize(fields = {})
     @fields = fields
   end
@@ -132,41 +142,33 @@ class JsonMapMarshal
   def marshal(map)
     marshalled = {}
     map.each do |k, v|
-      marshalled[k] = case @fields[k]
-                   when :base64
-                     Base64::encode64(v).chomp!
-                   when :literal
-                     v
-                   else
-                     raise "can't marshal #{k} as field type #{@fields[k]}"
-                   end
+      type = @fields[k]
+      raise "refusing to marshal unexpected property '#{k}'" if type.nil?
+      marshalled[k] = type == :base64 ? Base64::encode64(v).chomp! : v
     end
     marshalled.to_json
   end
 
   def unmarshal(string)
-    JSON.parse(string).tap do |map|
-      @fields.each do |f, type|
-        v = map.delete(f.to_s)
-        map[f] = case type
-                 when :base64
-                   Base64::decode64(v)
-                 when :literal
-                   v
-                 else
-                   raise "can't unmarshal #{k} as field type #{@fields[k]}"
-                 end
-      end
+    JSON.parse(string).inject({}) do |acc, (k, v)|
+      ksym, type = @fields.detect { |f, t| f.to_s == k }
+      raise "refusing to unmarshal unexpected property '#{k}'" if ksym.nil?
+      acc[ksym] = type == :base64 ? Base64::decode64(v) : v
+      acc
     end
   end
+
 end
 
 if __FILE__ == $0
   require 'redis'
   redis = Redis.new
-  store = RedisStoreProvider.new(redis, 'example-app:config:v1')
-  crypto = Aes256CbcCryptoProvider.new('password')
-  marshal = Aes256CbcJsonMapMarshal.new
+  store_provider = RedisStoreProvider.new(redis)
+  store = StoreProviderAPI.new(store_provider, 'example-app:config:v1')
+  crypto_provider = Aes256CbcCryptoProvider
+  crypto = CryptoProviderAPI.new(crypto_provider, 'password')
+  marshal_provider = JsonBase64MapMarshal.new(:iv => :base64, :salt => :base64, :iterations => :number, :ciphertext => :base64)
+  marshal = CryptoMarshalAPI.new(marshal_provider)
   secrets = SecureSecretStore.new(store, crypto, marshal)
 
   secrets.set_secret('deep-dark-secret', 'The cake is a lie!')
