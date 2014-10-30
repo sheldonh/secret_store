@@ -62,17 +62,17 @@ class MemoryStoreProvider
     @secrets = Marshal.load(Marshal.dump(initial_secrets))
   end
 
-  def set(prefix, key, value)
-    @secrets[prefix] ||= {}
-    @secrets[prefix][key] = value
+  def set(namespace, key, value)
+    @secrets[namespace] ||= {}
+    @secrets[namespace][key] = value
   end
 
-  def get(prefix, key)
-    @secrets[prefix][key] if @secrets.has_key?(prefix)
+  def get(namespace, key)
+    @secrets[namespace][key] if @secrets.has_key?(namespace)
   end
 
-  def all(prefix)
-    @secrets.has_key?(prefix) ? @secrets[prefix] : {}
+  def all(namespace)
+    @secrets.has_key?(namespace) ? @secrets[namespace] : {}
   end
 end
 
@@ -81,17 +81,17 @@ class RedisStoreProvider
     @redis = redis
   end
 
-  def set(prefix, key, value)
-    @redis.set(compound_key(prefix, key), value)
-    @redis.rpush(prefix, key)
+  def set(namespace, key, value)
+    @redis.set(compound_key(namespace, key), value)
+    @redis.rpush(namespace, key)
   end
 
-  def get(prefix, key)
-    @redis.get(compound_key(prefix, key))
+  def get(namespace, key)
+    @redis.get(compound_key(namespace, key))
   end
 
-  def all(prefix)
-    keys = @redis.lrange(prefix, 0, -1)
+  def all(namespace)
+    keys = @redis.lrange(namespace, 0, -1)
     {}.tap do |map|
       keys.each do |key|
         v = get(key)
@@ -102,8 +102,8 @@ class RedisStoreProvider
 
   private
 
-    def compound_key(prefix, key)
-      prefix + ":" + key
+    def compound_key(namespace, key)
+      namespace + ":" + key
     end
 end
 
