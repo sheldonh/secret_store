@@ -1,6 +1,8 @@
 #!/usr/bin/env ruby
 
 class SecretStore
+  attr_reader :store, :cipher, :marshal
+
   def initialize(store, cipher, marshal)
     @store = store
     @cipher = cipher
@@ -27,9 +29,16 @@ class SecretStore
       end
     end
   end
+
+  def self.fabricate(namespace: nil, key: nil, store_provider: nil, cipher_provider: nil, marshal_provider: nil)
+    store = StoreAPI.new(store_provider, namespace)
+    marshal = MarshalAPI.new(marshal_provider)
+    cipher = CipherAPI.new(cipher_provider, key)
+    SecretStore.new(store, cipher, marshal)
+  end
 end
 
-class StoreProviderAPI
+class StoreAPI
   def initialize(store, object)
     @store = store
     @object = object
@@ -45,6 +54,25 @@ class StoreProviderAPI
 
   def all
     @store.all(@object)
+  end
+end
+
+class MemoryStoreProvider
+  def initialize(initial_secrets = {})
+    @secrets = Marshal.load(Marshal.dump(initial_secrets))
+  end
+
+  def set(prefix, key, value)
+    @secrets[prefix] ||= {}
+    @secrets[prefix][key] = value
+  end
+
+  def get(prefix, key)
+    @secrets[prefix][key] if @secrets.has_key?(prefix)
+  end
+
+  def all(prefix)
+    @secrets.has_key?(prefix) ? @secrets[prefix] : {}
   end
 end
 
@@ -79,7 +107,7 @@ class RedisStoreProvider
     end
 end
 
-class CipherProviderAPI
+class CipherAPI
   def initialize(provider, key)
     @provider = provider
     @key = key
@@ -91,6 +119,17 @@ class CipherProviderAPI
 
   def decrypt(ciphertext_object)
     @provider.decrypt(@key, ciphertext_object)
+  end
+end
+
+module SnakeOilCipherProvider
+  def self.encrypt(key, cleartext)
+    ciphertext_object = "#{cleartext} covered in snake oil"
+  end
+
+  def self.decrypt(key, ciphertext_object)
+    ciphertext_object =~ /^(.*) covered in snake oil/
+    cleartext = $1 ? $1 : (raise "unexpected decryption error")
   end
 end
 
@@ -120,7 +159,7 @@ module Aes256CbcCipherProvider
   end
 end
 
-class CipherMarshalAPI
+class MarshalAPI
   def initialize(provider)
     @provider = provider
   end
@@ -134,10 +173,19 @@ class CipherMarshalAPI
   end
 end
 
+module NoopMarshalProvider
+  def self.marshal(o)
+    o
+  end
+
+  def self.unmarshal(o)
+    o
+  end
+end
+
 require 'base64'
 require 'json'
-class JsonBase64MapMarshal
-
+class JsonBase64MapMarshalProvider
   def initialize(fields = {})
     @fields = fields
   end
@@ -147,7 +195,7 @@ class JsonBase64MapMarshal
     map.each do |k, v|
       type = @fields[k]
       raise "refusing to marshal unexpected property '#{k}'" if type.nil?
-      marshalled[k] = type == :base64 ? Base64::encode64(v).chomp! : v
+      marshalled[k] = type == :base64 ? Base64::strict_encode64(v) : v
     end
     marshalled.to_json
   end
@@ -160,28 +208,68 @@ class JsonBase64MapMarshal
       acc
     end
   end
+end
 
+require 'base64'
+module Base64MarshalProvider
+  def self.marshal(o)
+    Base64::strict_encode64(Marshal.dump(o))
+  end
+
+  def self.unmarshal(string)
+    Marshal.load(Base64::decode64(string))
+  end
+end
+
+module TestSecretStoreFactory
+  def self.fabricate(namespace: nil, key: nil)
+    SecretStore.fabricate(
+      namespace: namespace,
+      key: key,
+      store_provider: MemoryStoreProvider.new,
+      cipher_provider: SnakeOilCipherProvider,
+      marshal_provider: NoopMarshalProvider)
+  end
 end
 
 if __FILE__ == $0
+  cipher_provider = Aes256CbcCipherProvider
+
+  # The cipher provider and store provider might not make compatible encoding demands. For example, Aes256CbcCipherProvider
+  # demands an object whose values are binary data, but RedisStoreProvider demands JSON objects.
+
+  # So for base64-valued json marshalling into redis, we could use:
   require 'redis'
   redis = Redis.new
   store_provider = RedisStoreProvider.new(redis)
-  store = StoreProviderAPI.new(store_provider, 'example-app:config:v1')
-  cipher_provider = Aes256CbcCipherProvider
-  cipher = CipherProviderAPI.new(cipher_provider, 'password')
-  marshal_provider = JsonBase64MapMarshal.new(:iv => :base64, :salt => :base64, :iterations => :number, :ciphertext => :base64)
-  marshal = CipherMarshalAPI.new(marshal_provider)
-  secrets = SecretStore.new(store, cipher, marshal)
+  marshal_provider = JsonBase64MapMarshalProvider.new(:iv => :base64, :salt => :base64, :iterations => :number, :ciphertext => :base64)
+
+  ## If we didn't care about the readability of the data, we could use the simpler, stdlib-native Base64MarshalProvider:
+  #marshal_provider = Base64MarshalProvider
+
+  ## Or, for an unmarshalled in-memory store, we could have used:
+  #store_provider = MemoryStoreProvider.new
+  #marshal_provider = NoopMarshalProvider
+
+  namespace = 'example-app:config:v1'
+  secrets = SecretStore.fabricate(
+    namespace: 'example-app:config:v1',
+    key: 'password',
+    store_provider: store_provider,
+    cipher_provider: cipher_provider,
+    marshal_provider: marshal_provider)
+
+  ## For testing, there's a store that isn't secure at all; it just adds " covered in snake oil" to the plaintext.
+  #secrets = TestSecretStoreFactory.fabricate(namespace: 'example-app:config:v1', key: 'password')
 
   secrets.set_secret('deep-dark-secret', 'The cake is a lie!')
   secrets.set_secret('light-blue-secret', 'The sky is not really blue.')
   secrets.set_secret('bright-pink-secret', "It's not rock, it's pop!")
 
-  puts redis.get('example-app:config:v1:deep-dark-secret')
-  puts "=> " + secrets.get_secret('deep-dark-secret')
-  puts redis.get('example-app:config:v1:light-blue-secret')
-  puts "=> " + secrets.get_secret('light-blue-secret')
-  puts redis.get('example-app:config:v1:bright-pink-secret')
-  puts "=> " + secrets.get_secret('bright-pink-secret')
+  puts "Ciphertext:   " + secrets.store.get('deep-dark-secret')
+  puts "=> Cleartext: " + secrets.get_secret('deep-dark-secret')
+  puts "Ciphertext:   " + secrets.store.get('light-blue-secret')
+  puts "=> Cleartext: " + secrets.get_secret('light-blue-secret')
+  puts "Ciphertext:   " + secrets.store.get('bright-pink-secret')
+  puts "=> Cleartext: " + secrets.get_secret('bright-pink-secret')
 end
