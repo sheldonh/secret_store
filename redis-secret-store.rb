@@ -1,26 +1,29 @@
 #!/usr/bin/env ruby
 
 class SecretStore
-  def initialize(store, crypto, marshal)
+  def initialize(store, cipher, marshal)
     @store = store
-    @crypto = crypto
+    @cipher = cipher
     @marshal = marshal
   end
 
   def set_secret(secret_name, secret)
-    encrypted_data = @marshal.marshal(@crypto.encrypt(secret))
-    @store.set(secret_name, encrypted_data)
+    ciphertext_object = @cipher.encrypt(secret)
+    encoded_ciphertext = @marshal.marshal(ciphertext_object)
+    @store.set(secret_name, encoded_ciphertext)
   end
 
   def get_secret(secret_name)
-    encrypted_data = @marshal.unmarshal(@store.get(secret_name))
-    @crypto.decrypt(encrypted_data)
+    encoded_ciphertext = @store.get(secret_name)
+    ciphertext_object = @marshal.unmarshal(encoded_ciphertext)
+    @cipher.decrypt(ciphertext_object)
   end
 
   def get_all_secrets
     @store.all.tap do |map|
-      map.each do |k, v|
-        crypts[k] = @crypto.decrypt(@marshal.unmarshal(v))
+      map.each do |secret_name, encoded_ciphertext|
+        ciphertext_object = @marshal.unmarshal(encoded_ciphertext)
+        crypts[secret_name] = @cipher.decrypt(ciphertext_object)
       end
     end
   end
@@ -76,7 +79,7 @@ class RedisStoreProvider
     end
 end
 
-class CryptoProviderAPI
+class CipherProviderAPI
   def initialize(provider, key)
     @provider = provider
     @key = key
@@ -86,48 +89,48 @@ class CryptoProviderAPI
     @provider.encrypt(@key, cleartext)
   end
 
-  def decrypt(ciphertext)
-    @provider.decrypt(@key, ciphertext)
+  def decrypt(ciphertext_object)
+    @provider.decrypt(@key, ciphertext_object)
   end
 end
 
 require "openssl"
-module Aes256CbcCryptoProvider
+module Aes256CbcCipherProvider
 
   ITERATIONS = 20_000 unless defined?(ITERATIONS)
 
-  def self.encrypt(key, plaintext)
+  def self.encrypt(key, cleartext)
     cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
     cipher.encrypt
     iv = cipher.random_iv
     salt = Time.now.nsec.to_s
     iterations = ITERATIONS
     cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
-    ciphertext = cipher.update(plaintext) + cipher.final
-    {iv: iv, salt: salt, iterations: iterations, ciphertext: ciphertext}
+    ciphertext = cipher.update(cleartext) + cipher.final
+    ciphertext_object = {iv: iv, salt: salt, iterations: iterations, ciphertext: ciphertext}
   end
 
-  def self.decrypt(key, crypto)
-    ciphertext, iv, salt, iterations = crypto[:ciphertext], crypto[:iv], crypto[:salt], crypto[:iterations]
+  def self.decrypt(key, ciphertext_object)
+    ciphertext, iv, salt, iterations = ciphertext_object[:ciphertext], ciphertext_object[:iv], ciphertext_object[:salt], ciphertext_object[:iterations]
     cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
     cipher.decrypt
     cipher.iv = iv
     cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
-    plaintext = cipher.update(ciphertext) + cipher.final
+    cleartext = cipher.update(ciphertext) + cipher.final
   end
 end
 
-class CryptoMarshalAPI
+class CipherMarshalAPI
   def initialize(provider)
     @provider = provider
   end
 
-  def marshal(encrypted_data)
-    @provider.marshal(encrypted_data)
+  def marshal(ciphertext_object)
+    @provider.marshal(ciphertext_object)
   end
 
-  def unmarshal(encoded_data)
-    @provider.unmarshal(encoded_data)
+  def unmarshal(encoded_ciphertext)
+    @provider.unmarshal(encoded_ciphertext)
   end
 end
 
@@ -165,11 +168,11 @@ if __FILE__ == $0
   redis = Redis.new
   store_provider = RedisStoreProvider.new(redis)
   store = StoreProviderAPI.new(store_provider, 'example-app:config:v1')
-  crypto_provider = Aes256CbcCryptoProvider
-  crypto = CryptoProviderAPI.new(crypto_provider, 'password')
+  cipher_provider = Aes256CbcCipherProvider
+  cipher = CipherProviderAPI.new(cipher_provider, 'password')
   marshal_provider = JsonBase64MapMarshal.new(:iv => :base64, :salt => :base64, :iterations => :number, :ciphertext => :base64)
-  marshal = CryptoMarshalAPI.new(marshal_provider)
-  secrets = SecretStore.new(store, crypto, marshal)
+  marshal = CipherMarshalAPI.new(marshal_provider)
+  secrets = SecretStore.new(store, cipher, marshal)
 
   secrets.set_secret('deep-dark-secret', 'The cake is a lie!')
   secrets.set_secret('light-blue-secret', 'The sky is not really blue.')
