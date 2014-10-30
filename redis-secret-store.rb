@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 
-class SecureSecretStore
+class SecretStore
   def initialize(store, crypto, marshal)
     @store = store
     @crypto = crypto
@@ -169,7 +169,7 @@ if __FILE__ == $0
   crypto = CryptoProviderAPI.new(crypto_provider, 'password')
   marshal_provider = JsonBase64MapMarshal.new(:iv => :base64, :salt => :base64, :iterations => :number, :ciphertext => :base64)
   marshal = CryptoMarshalAPI.new(marshal_provider)
-  secrets = SecureSecretStore.new(store, crypto, marshal)
+  secrets = SecretStore.new(store, crypto, marshal)
 
   secrets.set_secret('deep-dark-secret', 'The cake is a lie!')
   secrets.set_secret('light-blue-secret', 'The sky is not really blue.')
