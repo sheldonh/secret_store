@@ -1,3 +1,4 @@
-source "https://rubygems.org/"
+source 'https://rubygems.org'
 
-gem "redis", "~> 3.1"
+# Specify your gem's dependencies in ..gemspec
+gemspec
