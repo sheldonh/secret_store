@@ -39,21 +39,21 @@ class SecretStore
 end
 
 class StoreAPI
-  def initialize(store, object)
+  def initialize(store, namespace)
     @store = store
-    @object = object
+    @namespace = namespace
   end
 
   def set(property, value)
-    @store.set(@object, property, value)
+    @store.set(@namespace, property, value)
   end
 
   def get(property)
-    @store.get(@object, property)
+    @store.get(@namespace, property)
   end
 
   def all
-    @store.all(@object)
+    @store.all(@namespace)
   end
 end
 
