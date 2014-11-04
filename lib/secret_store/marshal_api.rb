@@ -1,3 +1,6 @@
+require 'secret_store'
+require 'secret_store/marshal_error'
+
 module SecretStore
 
   class MarshalAPI

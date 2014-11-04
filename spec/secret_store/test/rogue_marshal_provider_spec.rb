@@ -4,6 +4,8 @@ require 'secret_store/test'
 
 describe SecretStore::Test::RogueMarshalProvider do
 
+  it_behaves_like "a MarshalAPI provider", string: ['unbreakable ciphertext', 'Rogue unbreakable ciphertext']
+
   describe '.marshal(ciphertext_object)' do
 
     it 'returns the ciphertext_object with "Rogue " prepended to it' do
