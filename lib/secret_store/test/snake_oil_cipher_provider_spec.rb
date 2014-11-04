@@ -16,4 +16,12 @@ describe SecretStore::Test::SnakeOilCipherProvider do
 
   end
 
+  describe '.decrypt(ciphertext_object, key)' do
+
+    it 'returns the ciphertext_object with " dripping snake oil" stripped from the front' do
+      expect( described_class.decrypt('My little pony dripping snake oil', 'ignored-key') ).to eq 'My little pony'
+    end
+
+  end
+
 end

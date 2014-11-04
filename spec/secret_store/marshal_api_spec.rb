@@ -16,4 +16,12 @@ describe SecretStore::MarshalAPI do
 
   end
 
+  describe '.unmarshal(encoded_ciphertext)' do
+
+    it 'returns the ciphertext_object represented by the encoded_ciphertext' do
+      expect( subject.unmarshal('Rogue unbreakable ciphertext') ).to eq 'unbreakable ciphertext'
+    end
+
+  end
+
 end

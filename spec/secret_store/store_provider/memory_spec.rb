@@ -20,4 +20,17 @@ describe SecretStore::StoreProvider::Memory do
     end
   end
 
+  describe '.get(namespace, property)' do
+
+    it 'returns nil for an unknown namespace' do
+      expect( subject.get('starjuice:secret_store:test:v1', 'deep-dark-secret') ).to be_nil
+    end
+
+    it 'returns nil for an unknown property' do
+      subject.set('starjuice:secret_store:test:v1', 'not-what-you-are-looking-for', 'unbreakable ciphertext')
+      expect( subject.get('starjuice:secret_store:test:v1', 'deep-dark-secret') ).to be_nil
+    end
+
+  end
+
 end

@@ -8,6 +8,10 @@ module SecretStore
         "Rogue " + o
       end
 
+      def self.unmarshal(o)
+        o.gsub(/^Rogue /, '')
+      end
+
     end
 
   end

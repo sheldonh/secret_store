@@ -11,6 +11,10 @@ module SecretStore
       @cipher.encrypt(cleartext, @key)
     end
 
+    def decrypt(ciphertext_object)
+      @cipher.decrypt(ciphertext_object, @key)
+    end
+
   end
 
 end

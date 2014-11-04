@@ -12,10 +12,8 @@ end
 
 Then(/^the secret cleartext is not in the store$/) do
   @test.secret_cleartext_is_not_in_store
-  pending
 end
 
 Then(/^the application gets the secret cleartext$/) do
   @test.application_gets_secret_cleartext
-  pending
 end

@@ -15,13 +15,18 @@ class StubSecretStoreTestRunner
   end
 
   def secret_ciphertext_is_in_store
-    @secret_ciphertext = @secret_store.get_secret(@secret_name)
+    @secret_ciphertext = @secret_store.store.get(@secret_name)
     expect( @secret_ciphertext ).to match /dripping snake oil/
   end
 
   def secret_cleartext_is_not_in_store
+    @secret_ciphertext = @secret_store.store.get(@secret_name)
+    expect( @secret_ciphertext ).to_not eq @secret_cleartext
   end
 
   def application_gets_secret_cleartext
+    @application_secret_store = SecretStore::Base.new(@secret_store.store, @secret_store.cipher, @secret_store.marshal)
+    @application_secret_cleartext = @application_secret_store.get_secret(@secret_name)
+    expect( @application_secret_cleartext ).to eq @secret_cleartext
   end
 end

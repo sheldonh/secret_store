@@ -6,6 +6,8 @@ module SecretStore
 
   class Base
 
+    attr_reader :store, :cipher, :marshal
+
     def initialize(store, cipher, marshal)
       @store = store
       @cipher = cipher
@@ -20,7 +22,11 @@ module SecretStore
     end
 
     def get_secret(secret_name)
-      # TODO up to here
+      encoded_ciphertext = @store.get(secret_name)
+      unless encoded_ciphertext.nil?
+        ciphertext_object = @marshal.unmarshal(encoded_ciphertext)
+        @cipher.decrypt(ciphertext_object)
+      end
     end
 
   end

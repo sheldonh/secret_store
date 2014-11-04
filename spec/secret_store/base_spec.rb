@@ -37,4 +37,20 @@ describe SecretStore::Base do
 
   end
 
+  describe 'accessors' do
+
+    it '#store() returns the composed StoreAPI instance' do
+      expect( subject.store ).to be store
+    end
+
+    it '#cipher() returns the composed CipherAPI instance' do
+      expect( subject.cipher ).to be cipher
+    end
+
+    it '#marshal() returns the composed MarshalAPI instance' do
+      expect( subject.marshal ).to be marshal
+    end
+
+  end
+
 end

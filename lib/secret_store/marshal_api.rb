@@ -10,6 +10,10 @@ module SecretStore
       @provider.marshal(ciphertext_object)
     end
 
+    def unmarshal(encoded_ciphertext)
+      @provider.unmarshal(encoded_ciphertext)
+    end
+
   end
 
 end

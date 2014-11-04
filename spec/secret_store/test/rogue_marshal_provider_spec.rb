@@ -12,4 +12,12 @@ describe SecretStore::Test::RogueMarshalProvider do
 
   end
 
+  describe '.unmarshal(encoded_ciphertext)' do
+
+    it 'returns the encoded_ciphertext with "Rogue " stripped from the front' do
+      expect( described_class.unmarshal('Rogue unbreakable ciphertext') ).to eq 'unbreakable ciphertext'
+    end
+
+  end
+
 end
