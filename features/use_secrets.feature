@@ -1,9 +1,10 @@
-Feature: Secret store
+@use_secrets
+Feature: Use secrets
   As a developer
   I want to securely store secrets
   In order to configure applications
 
-  Scenario: Set a secret
+  Scenario: Set and get a secret
     Given a secret store
     When the developer sets the secret
     Then the secret ciphertext is in the store

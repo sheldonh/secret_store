@@ -1,4 +1,5 @@
-Feature: Secret store
+@manage_secrets
+Feature: Manage secrets
   As a security officer
   I want to manage stored secrets
   In order to respond to weak and exposed secrets
