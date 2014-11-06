@@ -1,0 +1,2 @@
+default: --profile stub --require features/step_definitions
+stub: --require features/test_runners/stub
