@@ -144,18 +144,51 @@ module Aes256CbcCipherProvider
     iv = cipher.random_iv
     salt = Time.now.nsec.to_s
     iterations = ITERATIONS
-    cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
+    key_len = cipher.key_len
+    cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, key_len)
     ciphertext = cipher.update(cleartext) + cipher.final
-    ciphertext_object = {iv: iv, salt: salt, iterations: iterations, ciphertext: ciphertext}
+
+    Asn1::Sequence.new('content_info', [
+      OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-9(9) smime(16) ct(1) contentInfo(6)}'),
+      Asn1::Sequence.new('enveloped_data', [
+        OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-7(7) envelopedData(3)}'),
+        Asn1::Integer.new('version', :unsure),
+        Asn1::Set.new('recipient_infos', [
+          Asn1::Sequence.new('password_recipient_info', [
+            Asn1::Integer.new('version', 0),
+            Asn1::Sequence.new('key_derivation_algorithm_identifier', [
+              OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-5(5) pBKDF2(12)}'),
+              Asn1::Sequence.new('parameters', [
+                Asn1::OctetString.new('salt', salt),
+                Asn1::Integer.new('iteration_count', iterations),
+                Asn1::Integer.new('key_length', key_len),
+                Asn1::Sequence.new('prf', [
+                  OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) digestAlgorithm(2) hmacWithSHA1(7)}')
+                ]),
+              ])
+            ]),
+            Asn1::Sequence.new('key_encryption_algorithm_identifier', [
+              OID.new('{joint-iso-itu-t(2) country(16) us(840) organization(1) gov(101) csor(3) nistAlgorithm(4) aes(1) aes256-CBC(42)}'),
+            ]),
+            EncryptedKey.new('...'),
+          ]),
+        ]),
+        EncryptedContentInfo.new('...'),
+        UnprotectedAttributes.new('...')
+      ]),
+      EncryptedData.new(
+      ),
+    ])
   end
 
-  def self.decrypt(key, ciphertext_object)
-    ciphertext, iv, salt, iterations = ciphertext_object[:ciphertext], ciphertext_object[:iv], ciphertext_object[:salt], ciphertext_object[:iterations]
+  def self.decrypt(key, exposed)
+    ciphertext, iv, salt, iterations = exposed[:ciphertext], exposed[:iv], exposed[:salt], exposed[:iterations]
     cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
     cipher.decrypt
     cipher.iv = iv
     cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
     cleartext = cipher.update(ciphertext) + cipher.final
+    return cleartext
   end
 end
 
