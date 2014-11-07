@@ -1,2 +1,3 @@
-default: --profile stub --require features/step_definitions
-stub: --require features/test_runners/stub
+default: --profile stub
+stub: --require features/step_definitions --require features/test_runners/stub
+test: --require features/step_definitions --require features/test_runners/test

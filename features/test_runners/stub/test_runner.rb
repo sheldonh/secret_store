@@ -45,7 +45,11 @@ module SecretStore
     class StubCipher
     end
 
-    class StubSecretStoreTestRunner
+  end
+
+  module TestRunner
+
+    class Stub
       include RSpec::Matchers
 
       def create_secret_store
@@ -78,4 +82,5 @@ module SecretStore
     end
 
   end
+
 end
