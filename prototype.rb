@@ -138,58 +138,67 @@ module Aes256CbcCipherProvider
 
   ITERATIONS = 20_000 unless defined?(ITERATIONS)
 
-  def self.encrypt(key, cleartext)
+  def self.encrypt(password, cleartext)
     cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
     cipher.encrypt
     iv = cipher.random_iv
     salt = Time.now.nsec.to_s
     iterations = ITERATIONS
     key_len = cipher.key_len
-    cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, key_len)
+    cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(password, salt, iterations, key_len)
     ciphertext = cipher.update(cleartext) + cipher.final
 
-    Asn1::Sequence.new('content_info', [
-      Asn1::OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-9(9) smime(16) ct(1) contentInfo(6)}'),
-      Asn1::Sequence.new('enveloped_data', [
-        Asn1::OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-7(7) envelopedData(3)}'),
+    Asn1::Sequence.new('contentInfo', [
+      Asn1::OID.new('contentType', '{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-7(7) envelopedData(3)}'),
+      Asn1::Sequence.new('envelopedData', [
         Asn1::Integer.new('version', :unsure),
-        Asn1::Set.new('recipient_infos', [
-          Asn1::Sequence.new('password_recipient_info', [
+        Asn1::Set.new('recipientInfos', [
+          Asn1::Sequence.new('passwordRecipientInfo', [
             Asn1::Integer.new('version', 0),
-            Asn1::Sequence.new('key_derivation_algorithm_identifier', [
-              Asn1::OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-5(5) pBKDF2(12)}'),
-              Asn1::Sequence.new('params', [
+            Asn1::Sequence.new('keyDerivationAlgorithmIdentifier', [
+              Asn1::OID.new('algorithm', '{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-5(5) pBKDF2(12)}'),
+              Asn1::Sequence.new('parameters', [
                 Asn1::OctetString.new('salt', salt),
-                Asn1::Integer.new('iteration_count', iterations),
-                Asn1::Integer.new('key_length', key_len),
+                Asn1::Integer.new('iterationCount', iterations),
+                Asn1::Integer.new('keyLength', key_len),
                 Asn1::Sequence.new('prf', [
-                  Asn1::OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) digestAlgorithm(2) hmacWithSHA1(7)}')
+                  Asn1::OID.new('algorithm', '{iso(1) member-body(2) us(840) rsadsi(113549) digestAlgorithm(2) hmacWithSHA1(7)}')
                 ]),
               ])
             ]),
-            Asn1::Sequence.new('key_encryption_algorithm_identifier', [
-              Asn1::OID.new('{joint-iso-itu-t(2) country(16) us(840) organization(1) gov(101) csor(3) nistAlgorithm(4) aes(1) aes256-CBC(42)}'),
-              Asn1::Sequence.new('params', [
+            Asn1::Sequence.new('keyEncryptionAlgorithmIdentifier', [
+              Asn1::OID.new('algorithm', '{joint-iso-itu-t(2) country(16) us(840) organization(1) gov(101) csor(3) nistAlgorithm(4) aes(1) aes256-CBC(42)}'),
+              Asn1::Sequence.new('parameters', [
                 Asn1::OctetString.new('AES-IV', 16, iv)
               ])
             ]),
-            Asn1::OctetString('encrypted_key', ciphertext), # This feels SOOO wrong! Surely the ciphertext goes in EncryptedData below?!
+            # What goes in here? Is it safe to encrypt the CEK with the KEK and expose that here?
+            # That seems to be what RFC5652 6.2.4 is telling me!
+            # Or the ciphertext? Then I delete encryptedContentInfo below, right?
+            Asn1::OctetString('encryptedKey', ""),
           ]),
         ]),
-        EncryptedContentInfo.new('...'),
-        UnprotectedAttributes.new('...')
-      ]),
-      EncryptedData.new(
-      ),
+        Asn1::Sequence.new('encryptedContentInfo', [
+          Asn1::OID.new('contentType', '# XXX What here? XXX'),
+          Asn1::Sequence.new('contentEncryptionAlgorithmIdentifier', [
+            Asn1::OID.new('{joint-iso-itu-t(2) country(16) us(840) organization(1) gov(101) csor(3) nistAlgorithm(4) aes(1) aes256-CBC(42)}'),
+            Asn1::Sequence.new('parameters', [
+              Asn1::OctetString.new('AES-IV', 16, iv)
+            ])
+          ]),
+          Asn1::OctetString.new('encryptedContent', ciphertext),
+        ]),
+        #Asn1::Sequence.new('protectedAttributes', [...])
+      ])
     ])
   end
 
-  def self.decrypt(key, exposed)
+  def self.decrypt(password, exposed)
     ciphertext, iv, salt, iterations = exposed[:ciphertext], exposed[:iv], exposed[:salt], exposed[:iterations]
     cipher = OpenSSL::Cipher::Cipher.new("aes-256-cbc")
     cipher.decrypt
     cipher.iv = iv
-    cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(key, salt, iterations, cipher.key_len)
+    cipher.key = OpenSSL::PKCS5.pbkdf2_hmac_sha1(password, salt, iterations, cipher.key_len)
     cleartext = cipher.update(ciphertext) + cipher.final
     return cleartext
   end
