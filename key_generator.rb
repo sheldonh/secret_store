@@ -1,4 +1,6 @@
 require 'openssl'
+require 'base64'
+require 'json'
 
 module CMS
 
@@ -13,6 +15,10 @@ module CMS
     def to_asn1
       OpenSSL::ASN1::Sequence.new( [@content_type, @content ].map(&:to_asn1) )
     end
+
+    def to_json
+      %Q<{"contentType":#{@content_type.to_json},"content":#{@content.to_json}}>
+    end
   end
 
   class EncryptedData
@@ -25,6 +31,10 @@ module CMS
 
     def to_asn1
       OpenSSL::ASN1::Sequence.new( [@version, @encrypted_content_info].map(&:to_asn1) )
+    end
+
+    def to_json
+      %Q<{"version":#{@version.to_json},"encryptedContentInfo":#{@encrypted_content_info.to_json}}>
     end
   end
 
@@ -40,6 +50,10 @@ module CMS
     def to_asn1
       OpenSSL::ASN1::Sequence.new( [@content_type, @content_encryption_algorithm, @encrypted_content].map(&:to_asn1) )
     end
+
+    def to_json
+      %Q<{"contentType":#{@content_type.to_json},"contentEncryptionAlgorithm":#{@content_encryption_algorithm.to_json},"encryptedContent":#{@encrypted_content.to_json}}>
+    end
   end
 
   class AlgorithmIdentifier
@@ -54,11 +68,18 @@ module CMS
       OpenSSL::ASN1::Sequence.new( [@algorithm, @parameters].map(&:to_asn1) )
     end
 
+    def to_json
+      %Q<{"algorithm":#{@algorithm.to_json},"parameters":#{@parameters.to_json}}>
+    end
   end
 
   class NilClass
     def to_asn1
       OpenSSL::ASN1::Null.new
+    end
+
+    def to_json
+      "null"
     end
   end
 
@@ -72,14 +93,24 @@ module CMS
     def to_asn1
       OpenSSL::ASN1::Integer.new(@value)
     end
+
+    def to_json
+      @value.to_json
+    end
   end
 
   class OID
-    attr_reader :asn1, :dotted, :label
+    # nanf - NameAndNumberForm, e.g. {iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-1(1) md2WithRSAEncryption(2)}
+    # dotted - ObjIdComponentsList, e.g. 1.2.840.113549.1.1.2
+    # short_name - NameForm, e.g. RSA-MD2
+    # long_name - NameForm, e.g. md2WithRSAEncryption
+    #
+    # See ITU-T Rec. X.680 http://www.itu.int/rec/dologin_pub.asp?lang=e&id=T-REC-X.680-200811-I!!PDF-E&type=items
+    attr_reader :nanf, :dotted, :label
 
-    def initialize(asn1, short_name, long_name)
-      @asn1 = asn1
-      @dotted = asn1.scan(/((?<![\d._-])\d+(?![\d._-]))/).join('.')
+    def initialize(nanf, short_name, long_name)
+      @nanf = nanf
+      @dotted = nanf.scan(/((?<![\d._-])\d+(?![\d._-]))/).join('.')
       @short_name = short_name
       @long_name = long_name
     end
@@ -87,10 +118,16 @@ module CMS
     def to_asn1
       OpenSSL::ASN1::ObjectId.new(@dotted)
     end
+
+    def to_json
+      %Q<{"nanf":#{@nanf.to_json},"dotted":#{@dotted.to_json},"shortName":#{@short_name.to_json},"longName":#{@long_name.to_json}>
+    end
   end
 
   class OctetString
     attr_reader :value
+
+    include Base64
 
     def initialize(value)
       @value = value
@@ -99,19 +136,39 @@ module CMS
     def to_asn1
       OpenSSL::ASN1::OctetString.new(@value)
     end
+
+    def to_json
+      %Q<{"#{strict_encode64(@value)}"}>
+    end
   end
 
   module ContentType
 
     module EncryptedData
+      def self.oid
+        CMS::OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-7(7) encryptedData(6)}', 'encryptedData', 'encryptedData')
+      end
+
       def self.to_asn1
-        CMS::OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-7(7) encryptedData(6)}', 'encryptedData', 'encryptedData').to_asn1
+        oid.to_asn1
+      end
+
+      def self.to_json
+        oid.to_json
       end
     end
 
     module Data
+      def self.oid
+        CMS::OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-7(7) data(1)}', 'data', 'data')
+      end
+
       def self.to_asn1
-        CMS::OID.new('{iso(1) member-body(2) us(840) rsadsi(113549) pkcs(1) pkcs-7(7) data(1)}', 'data', 'data').to_asn1
+        oid.to_asn1
+      end
+
+      def self.to_json
+        oid.to_json
       end
     end
 
@@ -149,8 +206,8 @@ module SecretStore
         cipher.encrypt
         cipher.key = cek
         iv = cipher.random_iv
-        cipher.update(cleartext)
-        ciphertext = cipher.final
+        ciphertext = cipher.update(cleartext) + cipher.final
+
         CMS::ContentInfo.new(
           content_type: CMS::ContentType::EncryptedData,
           content: CMS::EncryptedData.new(
@@ -168,7 +225,6 @@ module SecretStore
       end
 
       def self.decrypt(content_info, cek)
-        p content_info
         iv = content_info.content.encrypted_content_info.content_encryption_algorithm.parameters.value
         encrypted_content = content_info.content.encrypted_content_info.encrypted_content.value
 
@@ -176,8 +232,7 @@ module SecretStore
         cipher.decrypt
         cipher.key = cek
         cipher.iv = iv
-        cipher.update(encrypted_content)
-        cipher.final
+        cipher.update(encrypted_content) + cipher.final
       end
 
       private
@@ -214,17 +269,27 @@ if $0 == __FILE__
   include SecretStore::Encoding::Key
 
   key = SecretStore::CipherProvider::Aes256CbcCipherProvider.generate_key
-  puts "#{key.size * 8} bits"
-  puts to_hex(key)
-  puts to_hex(from_hex(to_hex(key)))
-  puts encode64(key)
 
+  puts "KEY:"
+  puts "#{key.size * 8} bits"
+  puts "Hex: #{to_hex(from_hex(to_hex(key)))}"
+  puts "Base64: #{strict_encode64(key)}"
+
+  puts
   plaintext = "The cake is a lie!"
-  encrypted = SecretStore::CipherProvider::Aes256CbcCipherProvider.encrypt(plaintext, key)
-  asn1 = encrypted.to_asn1
-  puts "ASN1: (hi ascii garbage): #{asn1.to_der}"
-  puts "ASN1: (base64) #{encode64 asn1.to_der}"
-  decrypted = SecretStore::CipherProvider::Aes256CbcCipherProvider.decrypt(encrypted, key)
+  puts "PLAINTEXT: #{plaintext}"
+  encrypted_data = SecretStore::CipherProvider::Aes256CbcCipherProvider.encrypt(plaintext, key)
+
+  asn1 = encrypted_data.to_asn1
+  puts
+  puts "ASN1 (hi ascii garbage):\n#{asn1.to_der}"
+  puts
+  puts "ASN1 (base64):\n#{strict_encode64 asn1.to_der}"
+  puts
+  puts "JSON:\n#{encrypted_data.to_json}"
+
+  decrypted = SecretStore::CipherProvider::Aes256CbcCipherProvider.decrypt(encrypted_data, key)
+  puts
   puts "DECRYPTED: #{decrypted}"
 
 end
