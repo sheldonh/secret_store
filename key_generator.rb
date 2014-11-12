@@ -1,6 +1,17 @@
 require 'openssl'
 require 'base64'
 require 'json'
+require 'yaml'
+
+class NilClass
+  def to_asn1
+    OpenSSL::ASN1::Null.new(nil)
+  end
+
+  def to_json
+    "null"
+  end
+end
 
 module CMS
 
@@ -13,7 +24,11 @@ module CMS
     end
 
     def to_asn1
-      OpenSSL::ASN1::Sequence.new( [@content_type, @content ].map(&:to_asn1) )
+      ct = @content_type.to_asn1
+      c = @content.to_asn1
+
+      OpenSSL::ASN1::Sequence.new( [ct, c] )
+      #OpenSSL::ASN1::Sequence.new( [@content_type, @content ].map(&:to_asn1) )
     end
 
     def to_json
@@ -22,19 +37,23 @@ module CMS
   end
 
   class EncryptedData
-    attr_reader :version, :encrypted_content_info
+    attr_reader :version, :encrypted_content_info, :unprotected_attrs
 
-    def initialize(version: nil, encrypted_content_info: nil)
+    def initialize(version: nil, encrypted_content_info: nil, unprotected_attrs: nil)
       @version = version
       @encrypted_content_info = encrypted_content_info
+      @unprotected_attrs = unprotected_attrs
     end
 
-    def to_asn1
-      OpenSSL::ASN1::Sequence.new( [@version, @encrypted_content_info].map(&:to_asn1) )
+    def to_asn1(*args)
+      OpenSSL::ASN1::ASN1Data.new(
+        [OpenSSL::ASN1::Sequence.new( [@version, @encrypted_content_info, @unprotected_attrs].map(&:to_asn1) )],
+        0, :CONTEXT_SPECIFIC
+      )
     end
 
     def to_json
-      %Q<{"version":#{@version.to_json},"encryptedContentInfo":#{@encrypted_content_info.to_json}}>
+      %Q<{"version":#{@version.to_json},"encryptedContentInfo":#{@encrypted_content_info.to_json},"unprotectedAttrs":#{@unprotected_attrs.to_json}}>
     end
   end
 
@@ -70,16 +89,6 @@ module CMS
 
     def to_json
       %Q<{"algorithm":#{@algorithm.to_json},"parameters":#{@parameters.to_json}}>
-    end
-  end
-
-  class NilClass
-    def to_asn1
-      OpenSSL::ASN1::Null.new
-    end
-
-    def to_json
-      "null"
     end
   end
 
@@ -139,6 +148,15 @@ module CMS
 
     def to_json
       %Q<{"#{strict_encode64(@value)}"}>
+    end
+  end
+
+  class BinaryString < OctetString
+  end
+
+  class CharacterString < BinaryString
+    def to_json
+      @value.to_json
     end
   end
 
@@ -247,16 +265,12 @@ module SecretStore
 
   module Encoding
 
-    module Key
+    def to_hex(key)
+      key.unpack('H*').first
+    end
 
-      def to_hex(key)
-        key.unpack('H*').first
-      end
-
-      def from_hex(hex)
-        hex.scan(/../).map { |x| x.hex }.pack('c*')
-      end
-
+    def from_hex(hex)
+      hex.scan(/../).map { |x| x.hex }.pack('c*')
     end
 
   end
@@ -266,19 +280,26 @@ end
 if $0 == __FILE__
   require 'base64'
   include Base64
-  include SecretStore::Encoding::Key
+  include SecretStore::Encoding
 
+  plaintext = "The cake is a lie!"
+  puts "PLAINTEXT: #{plaintext}"
   key = SecretStore::CipherProvider::Aes256CbcCipherProvider.generate_key
 
+  puts
   puts "KEY:"
   puts "#{key.size * 8} bits"
   puts "Hex: #{to_hex(from_hex(to_hex(key)))}"
   puts "Base64: #{strict_encode64(key)}"
 
-  puts
-  plaintext = "The cake is a lie!"
-  puts "PLAINTEXT: #{plaintext}"
   encrypted_data = SecretStore::CipherProvider::Aes256CbcCipherProvider.encrypt(plaintext, key)
+
+  File.open("encrypted_data.der", "w") do |io|
+    io.write encrypted_data.to_asn1.to_der
+  end
+
+  puts
+  puts "IV: #{to_hex(encrypted_data.content.encrypted_content_info.content_encryption_algorithm.parameters.value)}"
 
   asn1 = encrypted_data.to_asn1
   puts
@@ -287,6 +308,9 @@ if $0 == __FILE__
   puts "ASN1 (base64):\n#{strict_encode64 asn1.to_der}"
   puts
   puts "JSON:\n#{encrypted_data.to_json}"
+
+  puts
+  puts asn1.to_yaml
 
   decrypted = SecretStore::CipherProvider::Aes256CbcCipherProvider.decrypt(encrypted_data, key)
   puts

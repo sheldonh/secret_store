@@ -1,0 +1,32 @@
+ContentInfo ::= SEQUENCE {
+  contentType ContentType ::= id-encryptedData OBJECT IDENTIFIER ::= { 1 2 840 113549 1 7 6 },
+  content [0] EXPLICIT EncryptedData ::= SEQUENCE {
+    version CMSVersion ::= INTEGER 0,
+    encryptedContentInfo EncryptedContentInfo ::= SEQUENCE {
+      contentType ContentType ::= id-data OBJECT IDENTIFIER ::= { 1 2 840 113549 1 7 1 },
+      contentEncryptionAlgorithm ContentEncryptionAlgorithmIdentifier ::= AlgorithmIdentifier ::=  SEQUENCE  {
+        algorithm OBJECT IDENTIFIER ::= id-aes256-CBC OBJECT IDENTIFIER ::= { 2 16 840 1 101 3 4 1 42 },
+        parameters OCTET STRING ::= { $iv } OPTIONAL
+      }
+      encryptedContent [0] IMPLICIT EncryptedContent ::= OCTET STRING { $ciphertext } OPTIONAL
+    },
+    unprotectedAttrs [1] IMPLICIT UnprotectedAttributes ::= SET SIZE (1..MAX) OF Attribute OPTIONAL
+  }
+}
+
+SEQUENCE[
+  OID
+  SEQUENCE [0] EXPLICIT[
+    INTEGER
+    SEQUENCE[
+      OID
+      SEQUENCE[
+        OID
+        OCTET STRING OPTIONAL
+      ]
+      OCTET STRING [0] IMPLICIT OPTIONAL
+    ]
+    SET SIZE (1..MAX) [1] IMPLICIT OPTIONAL
+  ]
+]
+

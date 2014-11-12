@@ -1,0 +1,43 @@
+      ContentInfo ::= SEQUENCE {
+        contentType ContentType,
+        content [0] EXPLICIT ANY DEFINED BY contentType }
+
+      ContentType ::= OBJECT IDENTIFIER
+
+      EncryptedData ::= SEQUENCE {
+        version CMSVersion,
+        encryptedContentInfo EncryptedContentInfo,
+        unprotectedAttrs [1] IMPLICIT UnprotectedAttributes OPTIONAL }
+
+      EncryptedContentInfo ::= SEQUENCE {
+        contentType ContentType,
+        contentEncryptionAlgorithm ContentEncryptionAlgorithmIdentifier,
+        encryptedContent [0] IMPLICIT EncryptedContent OPTIONAL }
+
+      UnprotectedAttributes ::= SET SIZE (1..MAX) OF Attribute
+
+      EncryptedContent ::= OCTET STRING
+
+      ContentEncryptionAlgorithmIdentifier ::= AlgorithmIdentifier
+
+      AlgorithmIdentifier ::=  SEQUENCE  {
+        algorithm              OBJECT IDENTIFIER,
+        parameters             ANY DEFINED BY algorithm OPTIONAL  }
+
+      EncryptedContent ::= OCTET STRING
+
+      CMSVersion ::= INTEGER
+                     { v0(0), v1(1), v2(2), v3(3), v4(4), v5(5) }
+
+      id-ct-contentInfo OBJECT IDENTIFIER ::= { iso(1) member-body(2)
+         us(840) rsadsi(113549) pkcs(1) pkcs9(9) smime(16) ct(1) 6 }
+
+      id-encryptedData OBJECT IDENTIFIER ::= { iso(1) member-body(2)
+          us(840) rsadsi(113549) pkcs(1) pkcs7(7) 6 }
+
+      id-data OBJECT IDENTIFIER ::= { iso(1) member-body(2)
+          us(840) rsadsi(113549) pkcs(1) pkcs7(7) 1 }
+
+      id-aes256-CBC OBJECT IDENTIFIER ::= { joint-iso-itu-t(2)
+          country(16) us(840) organization(1) gov(101) csor(3)
+          nistAlgorithm(4) aes(1) aes256-CBC(42) }

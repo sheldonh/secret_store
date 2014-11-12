@@ -1,0 +1,92 @@
+I'm building a secret store, kinda like LastPass for services, where
+developers encrypt application secrets and place the ciphertext in the
+store, and then applications fetch the ciphertext and decrypt the secrets
+using a key that they were given by the runtime environment.
+
+This moves the problem of key distribution from provisioning to
+deployment, which is an improvement for me.
+
+I want to store ciphertext in a standard way to maximize client adoption,
+so I'm trying to store it as CMS Encrypted-Data. My prototype is using
+the Ruby bindings for OpenSSL::ASN1.
+
+I'm very close to having it right. When I produce DER-encoded CMS
+Encrypted-Data, openssl asn1parse renders it thus:
+
+ 0:d=0  hl=2 l=inf  cons: SEQUENCE
+ 2:d=1  hl=2 l=   9 prim: OBJECT            :pkcs7-encryptedData
+13:d=1  hl=2 l=inf  cons: cont [ 0 ]
+15:d=2  hl=2 l=inf  cons: SEQUENCE
+17:d=3  hl=2 l=   1 prim: INTEGER           :00
+20:d=3  hl=2 l=inf  cons: SEQUENCE
+22:d=4  hl=2 l=   9 prim: OBJECT            :pkcs7-data
+33:d=4  hl=2 l=  29 cons: SEQUENCE
+35:d=5  hl=2 l=   9 prim: OBJECT            :aes-256-cbc
+46:d=5  hl=2 l=  16 prim: OCTET STRING      [HEX DUMP]:9C8...
+64:d=4  hl=2 l=inf  cons: cont [ 0 ]
+66:d=5  hl=2 l=  16 prim: OCTET STRING      [HEX DUMP]:6EC...
+84:d=5  hl=2 l=   0 prim: EOC
+86:d=4  hl=2 l=   0 prim: EOC
+88:d=3  hl=2 l=   0 prim: EOC
+90:d=2  hl=2 l=   0 prim: EOC
+92:d=1  hl=2 l=   0 prim: EOC
+
+My own Ruby code produces this, though:
+
+
+ 0:d=0  hl=2 l=  98 cons: SEQUENCE
+ 2:d=1  hl=2 l=   9 prim: OBJECT            :pkcs7-encryptedData
+13:d=1  hl=2 l=  85 cons: cont [ 0 ]
+15:d=2  hl=2 l=  83 cons: SEQUENCE
+17:d=3  hl=2 l=   1 prim: INTEGER           :00
+20:d=3  hl=2 l=  76 cons: SEQUENCE
+22:d=4  hl=2 l=   9 prim: OBJECT            :pkcs7-data
+33:d=4  hl=2 l=  29 cons: SEQUENCE
+35:d=5  hl=2 l=   9 prim: OBJECT            :aes-256-cbc
+46:d=5  hl=2 l=  16 prim: OCTET STRING      [HEX DUMP]:9C0...
+64:d=4  hl=2 l=  32 prim: cont [ 0 ]
+98:d=3  hl=2 l=   0 cons: cont [ 1 ]
+
+The AES-IV is present, but the ciphertext is not. I've boiled the ruby
+code down for the purposes of asking this question:
+
+#>>>>>>>>>>>>>>>>>>>>>>>
+
+require 'openssl'
+
+cleartext = "The cake is a lie!"
+
+cipher = OpenSSL::Cipher::AES256.new(:CBC)
+cipher.encrypt
+cipher.random_key
+iv = cipher.random_iv
+ciphertext = cipher.update(cleartext) + cipher.final
+
+cms = OpenSSL::ASN1::Sequence.new([
+  OpenSSL::ASN1::ObjectId.new("1.2.840.113549.1.7.6"),
+  OpenSSL::ASN1::Sequence.new([
+    OpenSSL::ASN1::Integer.new(0),
+    OpenSSL::ASN1::Sequence.new([
+      OpenSSL::ASN1::ObjectId.new("1.2.840.113549.1.7.1"),
+      OpenSSL::ASN1::Sequence.new([
+        OpenSSL::ASN1::ObjectId.new("2.16.840.1.101.3.4.1.42"),
+        OpenSSL::ASN1::OctetString.new(iv)
+      ]),
+      OpenSSL::ASN1::OctetString.new(ciphertext, 0, :IMPLICIT)
+    ]),
+    OpenSSL::ASN1::Set.new([], 1, :IMPLICIT)
+  ], 0, :EXPLICIT)
+])
+
+$stdout.write cms.to_der
+
+#>>>>>>>>>>>>>>>>>>>>>>>
+
+I feed it to openssl asn1parse as follows:
+
+ruby mail-list-question.rb | openssl asn1parse -inform DER
+
+What am I doing wrong?
+
+Thanks,
+Sheldon.
