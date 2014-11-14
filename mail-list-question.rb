@@ -1,4 +1,5 @@
 require 'openssl'
+require 'yaml'
 
 cleartext = "The cake is a lie!"
 
@@ -18,10 +19,21 @@ cms = OpenSSL::ASN1::Sequence.new([
         OpenSSL::ASN1::ObjectId.new("2.16.840.1.101.3.4.1.42"),
         OpenSSL::ASN1::OctetString.new(iv)
       ]),
-      OpenSSL::ASN1::OctetString.new(ciphertext, 0, :IMPLICIT)
-    ]),
-    OpenSSL::ASN1::Set.new([], 1, :IMPLICIT)
-  ], 0, :EXPLICIT)
-])
+      OpenSSL::ASN1::ASN1Data.new([
+        OpenSSL::ASN1::OctetString.new(ciphertext),
+        OpenSSL::ASN1::EndOfContent.new
+      ], 0, :CONTEXT_SPECIFIC).tap { |x| x.infinite_length = true },
+      OpenSSL::ASN1::EndOfContent.new
+    ]).tap { |x| x.infinite_length = true },
+    #OpenSSL::ASN1::Set.new([], 1, :IMPLICIT) # Would require version 2 above
+    OpenSSL::ASN1::EndOfContent.new
+  ], 0, :EXPLICIT).tap { |x| x.infinite_length = true },
+  OpenSSL::ASN1::EndOfContent.new
+]).tap { |x| x.infinite_length = true }
 
-$stdout.write cms.to_der
+der = cms.to_der
+
+decoded = OpenSSL::ASN1.decode(der)
+$stderr.puts decoded.to_yaml
+
+$stdout.write der
